@@ -6,9 +6,11 @@ resource "google_container_cluster" "_" {
   node_pool {
     name = "builtin"
   }
+
   lifecycle {
     ignore_changes = [node_pool]
   }
+
 }
 
 # Creating and attaching the node-pool to the Kubernetes Cluster
@@ -19,7 +21,8 @@ resource "google_container_node_pool" "node-pool" {
 
   node_config {
     preemptible  = false
-    machine_type = "e2-standard-4"
+    machine_type = "e2-standard-2"
+    disk_size_gb = 50
   }
 }
 
@@ -80,12 +83,13 @@ kind: Elasticsearch
 metadata:
   name: quickstart
 spec:
-  version: 8.1.3
+  version: 8.7.0
   nodeSets:
   - name: default
     count: 3
     config:
       node.store.allow_mmap: false
+      
 YAML
 
   provisioner "local-exec" {
@@ -102,14 +106,50 @@ kind: Kibana
 metadata:
   name: quickstart
 spec:
-  version: 8.1.3
-  count: 1
+  version: 8.6.0
+  count: 2
   elasticsearchRef:
     name: quickstart
+  http:
+    service:
+      spec:
+        type: LoadBalancer
 YAML
 
   provisioner "local-exec" {
      command = "sleep 60"
   }
   depends_on = [helm_release.elastic, kubectl_manifest.elastic_quickstart]
+}
+
+# Create hearbeat manifest
+resource "kubectl_manifest" "heartbeat_quickstart" {
+    yaml_body = <<YAML
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: heartbeat-quickstart
+spec:
+  type: heartbeat
+  version: 8.6.0
+  elasticsearchRef:
+    name: quickstart
+  config:
+    heartbeat.monitors:
+      - type: tcp
+        schedule: '@every 1s'
+        hosts:
+          - 'quickstart-es-http.default.svc:9200'
+  deployment:
+    replicas: 1
+    podTemplate:
+      spec:
+        securityContext:
+          runAsUser: 0
+YAML
+
+  provisioner "local-exec" {
+     command = "sleep 60"
+  }
+  depends_on = [helm_release.elastic, kubectl_manifest.elastic_quickstart, kubectl_manifest.kibana_quickstart]
 }
